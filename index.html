@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Word Surfer 3D</title>
+<style>
+:root{color-scheme:dark;--bg:#12031f;--fg:#f3e8ff;--pink:#ff2bd6;--cyan:#22e6ff;--gold:#ffe14d;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:"Segoe UI",system-ui,sans-serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+canvas{display:block;position:fixed;inset:0;width:100%;height:100%}
+#hud{position:fixed;top:0;left:0;right:0;padding:calc(env(safe-area-inset-top,0px) + 10px) 10px 0;text-align:center;pointer-events:none}
+#lbl{font-size:11px;letter-spacing:.35em;color:var(--cyan);text-shadow:0 0 8px var(--cyan)}
+#word{display:flex;justify-content:center;gap:8px;margin:6px 0}
+.t{width:clamp(34px,9vw,52px);height:clamp(42px,11vw,62px);display:flex;align-items:center;justify-content:center;font-size:clamp(22px,6vw,34px);font-weight:800;border:2px solid #5b2a8c;border-radius:10px;color:#6c4a93;background:rgba(20,5,40,.6)}
+.t.on{color:#fff;border-color:var(--gold);background:rgba(255,225,77,.18);box-shadow:0 0 18px var(--gold),inset 0 0 10px rgba(255,225,77,.5);text-shadow:0 0 10px var(--gold);animation:pop .35s}
+@keyframes pop{50%{transform:scale(1.25)}}
+#stats{display:flex;justify-content:center;gap:16px;font-size:13px;letter-spacing:.1em;flex-wrap:wrap}
+#stats b{color:var(--gold);font-variant-numeric:tabular-nums}#lv{color:var(--pink);letter-spacing:.2em}
+#toast{position:fixed;top:32%;left:0;right:0;text-align:center;font-size:clamp(22px,6vw,40px);font-weight:900;color:var(--gold);text-shadow:0 0 18px var(--pink);opacity:0;pointer-events:none;transition:opacity .3s}
+#toast.s{opacity:1}
+#ov{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(10,2,20,.72);padding:16px}
+.card{max-width:440px;text-align:center;padding:26px 24px;border:2px solid var(--pink);border-radius:16px;background:rgba(20,5,40,.85);box-shadow:0 0 30px rgba(255,43,214,.5)}
+h1{margin:0 0 8px;font-size:clamp(28px,8vw,42px);letter-spacing:.06em;color:#fff;text-shadow:0 0 14px var(--pink),0 0 30px var(--cyan)}
+.card p{margin:8px 0 16px;line-height:1.5;font-size:15px}
+button{font:inherit;font-weight:800;letter-spacing:.15em;padding:12px 34px;font-size:16px;color:#12031f;background:var(--cyan);border:0;border-radius:999px;cursor:pointer;box-shadow:0 0 20px var(--cyan)}
+small{display:block;margin-top:14px;color:#b9a3d6;line-height:1.5}
+#auto{position:fixed;right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 12px);padding:9px 16px;font-size:12px;letter-spacing:.12em;color:#f3e8ff;background:rgba(20,5,40,.75);border:2px solid #5b2a8c;box-shadow:none}
+#auto.on{color:#12031f;background:var(--gold);border-color:var(--gold);box-shadow:0 0 16px var(--gold)}
+</style></head><body>
+<div id="hud"><div id="lbl">TARGET WORD</div><div id="word"></div>
+<div id="stats"><span>SCORE <b id="sc">0</b></span><span>BEST <b id="hi">0</b></span><span id="lv"></span><span>SPEED <b id="sp">0</b></span></div></div>
+<div id="toast"></div>
+<button id="auto">AUTOPILOT</button>
+<div id="ov"><div class="card"><h1>WORD SURFER 3D</h1>
+<p id="msg">Collect the letters that spell the target word. Dodge barriers, slide under arches and swerve around tall walls.</p>
+<button id="go">START</button>
+<small>← → / A D lanes · ↑ / Space jump · ↓ / S slide · P pause · T autopilot<br>Mobile: swipe left, right, up or down<br>Autopilot is on by default: it plays for you until you press a control.</small></div></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const WORDS=["SURF","NEON","WAVE","RETRO","PIXEL","SYNTH","GLOW","CYBER","LASER","TURBO","VIBES","DRIVE"];
+const LX=[-2.4,0,2.4],$=id=>document.getElementById(id);
+const R=new THREE.WebGLRenderer({antialias:true});R.setPixelRatio(Math.min(devicePixelRatio,2));document.body.appendChild(R.domElement);
+const S=new THREE.Scene();S.background=new THREE.Color(0x12031f);S.fog=new THREE.Fog(0x12031f,30,115);
+const C=new THREE.PerspectiveCamera(65,1,.1,300);
+function rs(){R.setSize(innerWidth,innerHeight);C.aspect=innerWidth/innerHeight;C.updateProjectionMatrix()}
+addEventListener('resize',rs);rs();
+S.add(new THREE.AmbientLight(0x7744bb,.9));
+const pl=new THREE.PointLight(0xff2bd6,1.6,30);S.add(pl);
+const dl=new THREE.DirectionalLight(0x22e6ff,.8);dl.position.set(-3,8,5);S.add(dl);
+
+// ground with scrolling grid
+const gc=document.createElement('canvas');gc.width=gc.height=128;
+{const x=gc.getContext('2d');x.fillStyle='#14052a';x.fillRect(0,0,128,128);x.strokeStyle='#ff2bd6';x.shadowColor='#ff2bd6';x.shadowBlur=8;x.lineWidth=4;x.strokeRect(0,0,128,128)}
+const gt=new THREE.CanvasTexture(gc);gt.wrapS=gt.wrapT=THREE.RepeatWrapping;gt.repeat.set(4,60);
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(9.6,240),new THREE.MeshBasicMaterial({map:gt}));
+ground.rotation.x=-Math.PI/2;ground.position.z=-100;S.add(ground);
+const glow=(x,w,c)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,.12,240),new THREE.MeshBasicMaterial({color:c}));m.position.set(x,.05,-100);S.add(m)};
+[-1.2,1.2].forEach(x=>glow(x,.06,0x22e6ff));[-4.8,4.8].forEach(x=>glow(x,.25,0xff2bd6));
+const side=new THREE.Mesh(new THREE.PlaneGeometry(200,240),new THREE.MeshBasicMaterial({color:0x0a0214}));
+side.rotation.x=-Math.PI/2;side.position.set(0,-.05,-100);S.add(side);
+
+// sun
+const sc=document.createElement('canvas');sc.width=sc.height=256;
+{const x=sc.getContext('2d'),g=x.createLinearGradient(0,0,0,256);g.addColorStop(0,'#ffe14d');g.addColorStop(1,'#ff2bd6');x.fillStyle=g;x.beginPath();x.arc(128,128,126,0,7);x.fill();
+x.globalCompositeOperation='destination-out';for(let i=0;i<7;i++)x.fillRect(0,130+i*18,256,i*2.2+2)}
+const sun=new THREE.Mesh(new THREE.PlaneGeometry(70,70),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(sc),transparent:true,fog:false}));
+sun.position.set(0,26,-170);S.add(sun);
+// stars
+{const p=[];for(let i=0;i<300;i++)p.push((Math.random()-.5)*300,Math.random()*80+10,-Math.random()*200-20);
+const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(p,3));
+S.add(new THREE.Points(g,new THREE.PointsMaterial({color:0xffffff,size:.8,fog:false})))}
+// side pylons
+const pyl=[];
+for(let i=0;i<14;i++)for(const s of[-1,1]){const c=(i+(s>0))%2?0xff2bd6:0x22e6ff;
+const m=new THREE.Mesh(new THREE.BoxGeometry(.6,4+Math.random()*6,.6),new THREE.MeshBasicMaterial({color:c}));
+m.position.set(s*(7+Math.random()*3),m.geometry.parameters.height/2,-i*11);S.add(m);pyl.push(m)}
+
+// player
+const P=new THREE.Group(),
+body=new THREE.Mesh(new THREE.BoxGeometry(.8,1,.5),new THREE.MeshStandardMaterial({color:0x0c2a44,emissive:0x22e6ff,emissiveIntensity:.8})),
+head=new THREE.Mesh(new THREE.SphereGeometry(.3,16,12),new THREE.MeshStandardMaterial({color:0xffffff,emissive:0xff2bd6,emissiveIntensity:.6})),
+legs=new THREE.Mesh(new THREE.BoxGeometry(.6,.5,.4),new THREE.MeshStandardMaterial({color:0x220a44,emissive:0xff2bd6,emissiveIntensity:.6}));
+legs.position.y=.25;body.position.y=1;head.position.y=1.8;
+const board=new THREE.Mesh(new THREE.BoxGeometry(.9,.08,1.6),new THREE.MeshBasicMaterial({color:0xffe14d}));board.position.y=.04;
+P.add(body,head,legs,board);S.add(P);
+
+// helpers
+const gcache={},mcache={};
+const geo=(w,h,d)=>gcache[[w,h,d]]||(gcache[[w,h,d]]={g:new THREE.BoxGeometry(w,h,d),e:null});
+const mat=c=>mcache[c]||(mcache[c]=new THREE.MeshStandardMaterial({color:0x1a0630,emissive:c,emissiveIntensity:.9}));
+const eline=new THREE.LineBasicMaterial({color:0xffffff});
+const smats={};
+function tokMat(ch,k){const key=ch+k;if(smats[key])return smats[key];
+const c=document.createElement('canvas');c.width=c.height=128;const x=c.getContext('2d'),col=k?'255,225,77':'34,230,255';
+const g=x.createRadialGradient(64,64,8,64,64,62);g.addColorStop(0,`rgba(${col},.6)`);g.addColorStop(1,`rgba(${col},0)`);x.fillStyle=g;x.fillRect(0,0,128,128);
+x.font='bold 70px system-ui,sans-serif';x.textAlign='center';x.textBaseline='middle';x.shadowColor=`rgb(${col})`;x.shadowBlur=18;x.fillStyle='#fff';x.fillText(ch,64,68);
+return smats[key]=new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),transparent:true,depthWrite:false})}
+
+// particles
+const parts=[],pg=new THREE.SphereGeometry(.09,6,6);
+for(let i=0;i<140;i++){const m=new THREE.Mesh(pg,new THREE.MeshBasicMaterial({color:0xffffff}));m.visible=false;S.add(m);parts.push({m,v:new THREE.Vector3(),l:0})}
+function burst(pos,col,n){let k=0;for(const p of parts){if(p.l>0)continue;p.l=.6+Math.random()*.4;p.m.visible=true;p.m.material.color.set(col);p.m.position.copy(pos);
+p.v.set((Math.random()-.5)*8,Math.random()*6,(Math.random()-.5)*8);if(++k>=n)break}}
+
+// state
+let st='menu',speed=0,score=0,lives=3,lane=1,px=0,py=0,vy=0,slideT=0,wantSlide=false,invul=0,shake=0,spawnD=0,t=0,tt=0,wi=-1,word='',filled=[],locked=false;
+let hi=0;try{hi=+localStorage.getItem('wordSurfer3dHi')||0}catch(e){}
+const obs=[],toks=[];
+function hud(){$('sc').textContent=Math.floor(score);$('hi').textContent=Math.max(hi,Math.floor(score));$('lv').textContent='♥'.repeat(Math.max(lives,0));$('sp').textContent=Math.round(speed*3.6)}
+function drawWord(){$('word').innerHTML=[...word].map((c,i)=>`<div class="t${filled[i]?' on':''}">${c}</div>`).join('')}
+function newWord(){let w;do w=WORDS[Math.random()*WORDS.length|0];while(w===word);word=w;filled=[...w].map(()=>false);locked=false;drawWord()}
+function toast(s){const e=$('toast');e.textContent=s;e.classList.add('s');setTimeout(()=>e.classList.remove('s'),900)}
+function need(){return[...word].filter((c,i)=>!filled[i])}
+
+function addObs(type,l,z){
+ const g=new THREE.Group();
+ const add=(w,h,d,x,y,c)=>{const o=geo(w,h,d);if(!o.e)o.e=new THREE.EdgesGeometry(o.g);const m=new THREE.Mesh(o.g,mat(c));m.position.set(x,y,0);m.add(new THREE.LineSegments(o.e,eline));g.add(m)};
+ if(type==='bar')add(2.2,.9,.5,0,.45,0xff2bd6);
+ else if(type==='arch'){add(.3,1.9,.5,-1,.95,0x22e6ff);add(.3,1.9,.5,1,.95,0x22e6ff);add(2.3,.6,.5,0,1.4,0xff7a00)}
+ else add(2.2,3,1,0,1.5,0xff3355);
+ g.position.set(LX[l],0,z);S.add(g);obs.push({g,type,x:LX[l],z,hit:false})}
+function addTok(l,z){
+ const ch=need().length&&Math.random()<.5?need()[Math.random()*need().length|0]:String.fromCharCode(65+Math.random()*26|0);
+ const k=need().includes(ch)?1:0,s=new THREE.Sprite(tokMat(ch,k));s.scale.set(1.7,1.7,1);s.position.set(LX[l],1.2,z);S.add(s);toks.push({s,ch,x:LX[l],z})}
+function spawnRow(){
+ const z=-120,free=[0,1,2];
+ if(Math.random()<.72){const type=['bar','arch','wall'][Math.random()*3|0],n=type==='wall'?(Math.random()<.4?2:1):(Math.random()<.5?2:1);
+  [0,1,2].sort(()=>Math.random()-.5).slice(0,n).forEach(l=>{addObs(type,l,z);free.splice(free.indexOf(l),1)})}
+ free.sort(()=>Math.random()-.5).slice(0,1+(Math.random()*2|0)).forEach(l=>addTok(l,z+6))}
+
+function reset(){obs.forEach(o=>S.remove(o.g));toks.forEach(o=>S.remove(o.s));obs.length=toks.length=0;
+ speed=16;score=0;lives=3;lane=1;px=0;py=0;vy=0;slideT=0;wantSlide=false;invul=0;spawnD=10;word='';newWord();hud()}
+function start(){reset();st='play';$('ov').style.display='none'}
+function over(){st='over';let nb=score>hi;if(nb){hi=Math.floor(score);try{localStorage.setItem('wordSurfer3dHi',hi)}catch(e){}}
+ $('msg').innerHTML=`Game over<br>Score <b style="color:var(--gold)">${Math.floor(score)}</b> · Best <b style="color:var(--cyan)">${hi}</b>${nb?'<br>New high score!':''}`;
+ $('go').textContent='PLAY AGAIN';$('ov').style.display='flex';hud()}
+function pause(){if(st==='play'){st='pause';$('msg').textContent='Paused';$('go').textContent='RESUME';$('ov').style.display='flex'}}
+$('go').onclick=()=>{if(st==='pause'){st='play';$('ov').style.display='none'}else start()};
+
+// input
+function act(a){if(st!=='play')return;
+ if(a==='L')lane=Math.max(0,lane-1);else if(a==='R')lane=Math.min(2,lane+1);
+ else if(a==='U'&&py<=0){vy=12;slideT=0}
+ else if(a==='D'){if(py<=0)slideT=.7;else{vy=-18;wantSlide=true}}}
+addEventListener('keydown',e=>{const k=e.key.toLowerCase();
+ if(['arrowleft','arrowright','arrowup','arrowdown',' '].includes(k))e.preventDefault();
+ if(k==='arrowleft'||k==='a')userAct('L');else if(k==='arrowright'||k==='d')userAct('R');
+ else if(k==='arrowup'||k==='w'||(k===' '&&st==='play'))userAct('U');else if(k==='arrowdown'||k==='s')userAct('D');
+ else if(k==='t')setAuto(!auto);
+ else if(k==='p'||k==='escape')st==='pause'?$('go').click():pause();
+ else if((k==='enter'||k===' ')&&st!=='play'){$('go').click()}});
+let tx=0,ty=0,tf=true;
+addEventListener('touchstart',e=>{tx=e.touches[0].clientX;ty=e.touches[0].clientY;tf=false},{passive:true});
+addEventListener('touchmove',e=>{if(tf)return;const dx=e.touches[0].clientX-tx,dy=e.touches[0].clientY-ty;
+ if(Math.max(Math.abs(dx),Math.abs(dy))<28)return;tf=true;
+ if(Math.abs(dx)>Math.abs(dy))userAct(dx<0?'L':'R');else userAct(dy<0?'U':'D')},{passive:true});
+addEventListener('blur',pause);
+
+// autopilot: steers toward the safest lane, grabs needed letters, jumps bars, slides under arches
+let auto=true,acd=0;
+function setAuto(v){auto=v;const b=$('auto');b.textContent='AUTOPILOT: '+(v?'ON':'OFF');b.classList.toggle('on',v)}
+function userAct(a){if(auto)setAuto(false);act(a)}
+$('auto').onclick=e=>{setAuto(!auto);e.currentTarget.blur()};
+setAuto(true);
+function autopilot(dt){
+ acd-=dt;
+ const want=locked?[]:need(),cost=[0,0,0];
+ for(const o of obs){if(o.hit||o.z>1.5||o.z<-48)continue;
+  cost[LX.indexOf(o.x)]+=(o.type==='wall'?100:3)/(1+Math.max(-o.z,0)/12)}
+ for(const k of toks){if(k.z>1.5||k.z<-40)continue;
+  cost[LX.indexOf(k.x)]-=(want.includes(k.ch)?8:1)/(1+Math.max(-k.z,0)/12)}
+ const sc=l=>cost[l]+Math.abs(l-lane)*.6;let best=lane;
+ for(let l=0;l<3;l++)if(sc(l)<sc(best)-.5)best=l;
+ if(best!==lane&&acd<=0){act(best<lane?'L':'R');acd=.12;return}
+ if(py>0)return;
+ let n=null;
+ for(const o of obs){if(o.hit||o.z>.6||o.z<-60||Math.abs(o.x-LX[lane])>.1)continue;if(!n||o.z>n.z)n=o}
+ if(!n)return;
+ const d=-n.z;
+ if(n.type==='bar'&&d<speed*.34)act('U');
+ else if(n.type==='arch'&&d<speed*.3)act('D')}
+
+function update(dt){
+ if(auto)autopilot(dt);
+ speed=Math.min(speed+.35*dt,44);score+=speed*dt*.5;
+ px+=(LX[lane]-px)*Math.min(1,14*dt);P.position.x=px;P.rotation.z=(px-LX[lane])*.12;
+ vy-=36*dt;py+=vy*dt;if(py<=0){py=0;vy=0;if(wantSlide){slideT=.7;wantSlide=false}}
+ if(slideT>0)slideT-=dt;const sl=slideT>0&&py<=0,h=sl?.8:1.6;
+ P.scale.y=sl?.5:1;P.position.y=py+(py<=0&&!sl?Math.abs(Math.sin(t*14))*.06:0);
+ invul-=dt;P.visible=invul<=0||Math.floor(t*14)%2===0;
+ pl.position.set(px,3,2);
+ spawnD-=speed*dt;if(spawnD<=0){spawnRow();spawnD=13+Math.random()*7}
+ const d=speed*dt;
+ for(let i=obs.length-1;i>=0;i--){const o=obs[i];o.z+=d;o.g.position.z=o.z;
+  if(!o.hit&&invul<=0&&Math.abs(o.z)<.85&&Math.abs(o.x-px)<1.05){
+   const hitY=o.type==='bar'?py<.9:o.type==='arch'?(py<1.7&&py+h>1.1):py<3;
+   if(hitY){o.hit=true;lives--;invul=1.8;shake=.6;burst(new THREE.Vector3(px,1,0),0xff3355,30);hud();if(lives<=0){over();return}}}
+  if(o.z>9){S.remove(o.g);obs.splice(i,1)}}
+ for(let i=toks.length-1;i>=0;i--){const o=toks[i];o.z+=d;o.s.position.z=o.z;o.s.position.y=1.2+Math.sin(t*4+o.z)*.15;
+  if(Math.abs(o.z)<.9&&Math.abs(o.x-px)<1.15&&1.2>py-.4&&1.2<py+h+.4){
+   const idx=locked?-1:[...word].findIndex((c,j)=>c===o.ch&&!filled[j]);
+   if(idx>=0){filled[idx]=true;score+=150;burst(o.s.position,0xffe14d,24);drawWord();
+    if(filled.every(Boolean)){locked=true;score+=500;speed+=1.5;toast('WORD COMPLETE +500');burst(new THREE.Vector3(px,1.5,0),0xff2bd6,60);setTimeout(()=>{if(st!=='menu')newWord()},800)}}
+   else{score+=10;burst(o.s.position,0x22e6ff,12)}
+   S.remove(o.s);toks.splice(i,1);hud();continue}
+  if(o.z>9){S.remove(o.s);toks.splice(i,1)}}
+ tt+=dt;if(tt>.1){tt=0;hud()}
+}
+const clk=new THREE.Clock();
+function tick(){requestAnimationFrame(tick);const dt=Math.min(clk.getDelta(),.05);t+=dt;
+ const sp=st==='play'?speed:st==='pause'?0:7,d=sp*dt;
+ gt.offset.y+=d/4;pyl.forEach(m=>{m.position.z+=d;if(m.position.z>10)m.position.z-=154});
+ if(st==='play')update(dt);
+ for(const p of parts){if(p.l<=0)continue;p.l-=dt;p.v.y-=14*dt;p.m.position.addScaledVector(p.v,dt);p.m.position.z+=d;if(p.l<=0)p.m.visible=false}
+ shake=Math.max(0,shake-dt*1.5);
+ C.position.set(px*.55+(Math.random()-.5)*shake,4.3+(Math.random()-.5)*shake,7.5);C.lookAt(px*.3,1.3,-8);
+ R.render(S,C)}
+newWord();hud();tick();
+</script></body></html>
